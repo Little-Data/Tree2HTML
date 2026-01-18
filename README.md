@@ -8,8 +8,8 @@
 
 # 使用方法
 
-1. 下载Tree2HTML.py文件直接运行（需安装[Python](https://www.python.org/)）
-2. 到 [Releases](https://github.com/Little-Data/Tree2HTML/releases) 下载压缩文件后解压运行.exe文件（仅Windows）
+1. 下载Tree2HTML.py和template.html文件，两个文件放在一起，运行Tree2HTML.py（需安装[Python](https://www.python.org/)）
+2. 到 [Releases](https://github.com/Little-Data/Tree2HTML/releases) 下载压缩文件后 **全部** 解压运行.exe文件（仅Windows）
 
 # 配置说明
 
