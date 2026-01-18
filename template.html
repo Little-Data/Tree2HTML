@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <title>$title的快照</title>
+    <style>
+        /* 基础全局样式 */
+        body {
+            font-family: Consolas, Menlo, monospace;
+            background: #f9f9f9;
+            color: #333;
+            margin: 0;
+            padding: 1em;
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+        }
+        h1 {
+            font-size: 20px;
+            margin-bottom: 0.5em;
+        }
+        .controls {
+            margin-bottom: 1em;
+        }
+        /* 控件样式 */
+        input.search {
+            padding: 6px 8px;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            min-width: 240px;
+        }
+        button {
+            padding: 5px 10px;
+            border: 1px solid #bbb;
+            background: #eee;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        /* 树形结构样式 */
+        ul {
+            list-style: none;
+            padding-left: 20px;
+            margin: 0;
+        }
+        li {
+            line-height: 1.5;
+            position: relative;
+        }
+        li::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -10px;
+            width: 1px;
+            height: 100%;
+            background: #ccc;
+        }
+        li:last-child::before {
+            height: 12px;
+        }
+        /* 文件/文件夹图标 */
+        li.dir > .icon.folder::before {
+            content: '📁';
+            margin-right: 4px;
+        }
+        li.file > .icon.file::before {
+            content: '📄';
+            margin-right: 4px;
+        }
+        /* 目录展开/收起控制 */
+        .dir > ul {
+            display: none;
+        }
+        .dir.expanded > ul {
+            display: block;
+        }
+        .dir > .label {
+            cursor: pointer;
+            color: #005bbb;
+        }
+        /* 文件链接样式 */
+        li.file > .label a {
+            color: #2e7d32;
+            text-decoration: none;
+        }
+        li.file > .label a:hover {
+            color: #1b5e20;
+            text-decoration: underline;
+        }
+        li.file > .label a:visited {
+            color: #4a148c;
+        }
+        /* 辅助样式 */
+        .meta {
+            color: #666;
+            font-size: 0.85em;
+            margin-left: 1px;
+        }
+        .match {
+            background: #fffbdd;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .small {
+            color: #666;
+            font-size: 0.85em;
+        }
+        .count-info {
+            color: #005bbb;
+            margin: 0 0 1em 0;
+            font-size: 0.9em;
+        }
+        /* 回到顶部悬浮按钮 */
+        #back-to-top {
+            position: fixed;
+            right: 25px;
+            bottom: 25px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #005bbb;
+            color: #ffffff;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        /* 按钮悬浮变色效果 */
+        #back-to-top:hover {
+            background: #0078d7;
+            transform: scale(1.05);
+        }
+        /* 按钮显示的样式类 */
+        #back-to-top.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        /* 出错目录样式 */
+        li.dir[data-error='true'] {
+            background: #b03f3f;
+        }
+        li.dir[data-error='true'] .meta{
+            color: #f7ff14;
+        }
+        li.dir[data-error='true'] .label{
+            color: #f7ff14;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>快照: $root_display</h1><!-- {root_display} > $root_display -->
+        <p class="small">生成时间: $now</p>
+        <p class="count-info">共 $dirs_count 个文件夹 | $files_count 个文件</p>
+        <div class="controls">
+            <input id="search" class="search" placeholder="点此输入搜索内容..." />
+            <button id="search-btn" style="margin-left: 8px;">搜索</button>
+            <button id="clear">清除</button>
+            <button id="toggle-all-btn" style="margin-left: 8px;">全部展开</button>
+        </div>
+        <ul id="tree">$tree_html</ul>
+        <p class="small">点击名称展开/收起</p>
+        <p class="small">Tree2HTML HAF半个水果 <a href='https://github.com/Little-Data/Tree2HTML' target='_blank'>https://github.com/Little-Data/Tree2HTML</a></p>
+    </div>
+    <button id="back-to-top">↑</button>
+
+    <script>
+        (function() {
+            // 获取页面核心DOM元素
+            const tree = document.getElementById('tree');
+            const searchInput = document.getElementById('search');
+            const searchBtn = document.getElementById('search-btn');
+            const clearBtn = document.getElementById('clear');
+            const toggleAllBtn = document.getElementById('toggle-all-btn');
+            const backToTopBtn = document.getElementById('back-to-top');
+            
+            // 全局状态：是否全部展开
+            let isAllExpanded = false;
+
+            // 滚动定时器，用于控制按钮隐藏延迟
+            let scrollTimer = null;
+
+            // 停止滚动后隐藏按钮的延迟时间(毫秒)
+            const HIDE_DELAY = 2000;
+
+            // 滚动多少距离后显示按钮
+            let SHOW_OFFSET = 500;
+
+            // 目录数量文本
+            function initDirMetaText() {
+                const emptyDirText = "[空]";
+                const dirFileCountText = (dirNum, fileNum) => `[${dirNum} 个文件夹 | ${fileNum} 个文件]`;
+                const errorDirText = "[读取出错]";
+
+                // 遍历所有目录节点，替换meta文本
+                document.querySelectorAll('li.dir').forEach(dirLi => {
+                    const dirCount = parseInt(dirLi.dataset.dirCount || 0);
+                    const fileCount = parseInt(dirLi.dataset.fileCount || 0);
+                    const metaSpan = dirLi.querySelector('.meta');
+                    if (metaSpan) {
+                        let countText;
+                        if (dirLi.dataset.error === 'true') {
+                            // 出错目录：替换为[读取出错]，并保留红色背景
+                            countText = errorDirText;
+                        } else {
+                            // 空目录：替换为[空]，非空则显示数量
+                            countText = dirCount + fileCount === 0 ? emptyDirText : dirFileCountText(dirCount, fileCount);
+                        }
+                        // 替换原有时间文本为最终提示文本
+                        metaSpan.textContent = countText;
+                    }
+                });
+            }
+
+            // 转小写，用于搜索匹配（忽略大小写）
+            function normalize(str) {
+                return (str || '').toLowerCase();
+            }
+
+            // 重置搜索结果：显示所有文件/文件夹，移除高亮匹配样式
+            function showAllItems() {
+                const allLi = document.querySelectorAll('li');
+                const allDirs = document.querySelectorAll('.dir');
+                // 显示所有节点 + 移除高亮
+                allLi.forEach(item => {
+                    item.classList.remove('hidden', 'match');
+                });
+                // 清除后，所有目录强制展开
+                allDirs.forEach(dir => {
+                    dir.classList.add('expanded');
+                    dir.classList.remove('collapsed');
+                });
+                // 同步全局状态+按钮文字
+                isAllExpanded = true;
+                toggleAllBtn.textContent = '全部收起';
+            }
+
+            function backToTop() {
+                // 平滑滚动到页面顶部
+                window.scrollTo({
+                    top: 0,
+                    behavior: 'smooth'
+                });
+            }
+
+            // 显示回到顶部按钮
+            function showBackBtn() {
+                backToTopBtn.classList.add('show');
+                // 清除之前的定时器，避免重复触发隐藏
+                if (scrollTimer) clearTimeout(scrollTimer);
+            }
+
+            // 隐藏回到顶部按钮
+            function hideBackBtn() {
+                scrollTimer = setTimeout(() => {
+                    backToTopBtn.classList.remove('show');
+                }, HIDE_DELAY);
+            }
+
+            // 目录点击展开/收起
+            tree.addEventListener('click', function(e) {
+                // 只监听文件夹名称的点击事件
+                if (e.target.classList.contains('label')) {
+                    const li = e.target.closest('li');
+                    // 仅处理文件夹类型的节点
+                    if (!li || !li.classList.contains('dir')) return;
+                    // 切换展开/收起的样式类
+                    li.classList.toggle('expanded');
+                    li.classList.toggle('collapsed');
+                }
+            });
+
+            // 文件/文件夹搜索过滤
+            function filterItems(searchTerm) {
+                const term = normalize(searchTerm);
+                if (!term) {
+                    showAllItems();
+                    return;
+                }
+                
+                document.querySelectorAll('li').forEach(item => {
+                    const itemName = normalize(item.dataset.name || '');
+                    if (itemName.indexOf(term) !== -1) {
+                        item.classList.remove('hidden');
+                        item.classList.add('match');
+                        // 递归显示所有上级目录，确保匹配项可见
+                        let parentNode = item.parentElement;
+                        while (parentNode && parentNode.id !== 'tree') {
+                            if (parentNode.tagName.toLowerCase() === 'li') {
+                                parentNode.classList.remove('hidden');
+                                parentNode.classList.add('expanded');
+                            }
+                            parentNode = parentNode.parentElement;
+                        }
+                    } else {
+                        item.classList.add('hidden');
+                        item.classList.remove('match');
+                    }
+                });
+                // 同步全局状态+按钮文字
+                isAllExpanded = true;
+                toggleAllBtn.textContent = '全部收起';
+            }
+
+            // 点击搜索按钮触发搜索
+            searchBtn.addEventListener('click', () => {
+                filterItems(searchInput.value);
+            });
+
+            // 回车触发搜索
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    filterItems(searchInput.value);
+                }
+            });
+
+            // 清空搜索框+重置显示+聚焦输入框
+            clearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                showAllItems();
+                searchInput.focus();
+            });
+
+            // 全部展开 / 全部收起 切换
+            toggleAllBtn.addEventListener('click', function() {
+                const allDirNodes = document.querySelectorAll('.dir');
+                
+                if (!isAllExpanded) {
+                    // 全部展开逻辑
+                    allDirNodes.forEach(dir => {
+                        dir.classList.add('expanded');
+                        dir.classList.remove('collapsed');
+                    });
+                    toggleAllBtn.textContent = '全部收起';
+                } else {
+                    // 全部收起逻辑
+                    allDirNodes.forEach(dir => {
+                        dir.classList.add('collapsed');
+                        dir.classList.remove('expanded');
+                    });
+                    toggleAllBtn.textContent = '全部展开';
+                }
+                // 切换全局状态
+                isAllExpanded = !isAllExpanded;
+            });
+
+            // 监听页面滚动
+            window.addEventListener('scroll', function() {
+                // 滚动距离超过阈值，显示按钮否则直接隐藏
+                if (window.pageYOffset > SHOW_OFFSET) {
+                    showBackBtn();
+                } else {
+                    hideBackBtn();
+                    if(scrollTimer) clearTimeout(scrollTimer);
+                    return;
+                }
+                
+                clearTimeout(scrollTimer);
+                // 停止滚动后，延迟指定时间自动隐藏按钮
+                scrollTimer = setTimeout(() => {
+                    hideBackBtn();
+                }, HIDE_DELAY);
+            });
+
+            // 点击按钮回到顶部
+            backToTopBtn.addEventListener('click', backToTop);
+
+            // 目录数量文本初始化
+            initDirMetaText();
+
+        })();
+    </script>
+</body>
+</html>
